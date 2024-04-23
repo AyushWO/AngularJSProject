@@ -4,24 +4,47 @@ app.config(function ($routeProvider) {
   $routeProvider
     .when("/sign-in", {
       templateUrl: "sign-in.html",
-      controller: "SignInController",
+      controller: "SignInController"
     })
     .when("/sign-up", {
       templateUrl: "sign-up.html",
-      controller: "SignUpController",
+      controller: "SignUpController"
     })
     .when("/contact-list", {
       templateUrl: "contact-list.html",
       controller: "ContactListController",
+      resolve: {
+        loginCheck: function (AuthService) {
+          AuthService.requireLogin();
+        }
+      },
+      authenticate: true
     })
     .when("/add-edit-contact", {
       templateUrl: "add-edit-contact.html",
       controller: "AddEditContactController",
+      resolve: {
+        loginCheck: function (AuthService) {
+          AuthService.requireLogin();
+        }
+      },
+      authenticate: true
     })
     .otherwise({ redirectTo: "/sign-in" });
 });
 
-app.controller("SignInController", function ($scope, $location, UserService) {
+app.run(function ($rootScope, $location, AuthService) {
+  $rootScope.$on("$routeChangeStart", function (event, next, current) {
+    if (next.$$route && next.$$route.authenticate && !AuthService.isLoggedIn()) {
+      $location.path("/sign-in");
+    }
+    if (next.$$route && next.$$route.originalPath === "/sign-in" && AuthService.isLoggedIn()) {
+      $location.path("/contact-list");
+    }
+  });
+});
+
+app.controller("SignInController", function ($scope, $location, UserService, AuthService) {
   $scope.signInData = {};
   $scope.error = "";
 
@@ -69,66 +92,63 @@ app.controller("SignUpController", function ($scope, $location, UserService) {
   };
 });
 
-app.controller(
-  "ContactListController",
-  function ($scope, $location, UserService) {
-    $scope.contacts = UserService.getCurrentUserContacts();
+app.controller("ContactListController", function ($scope, $location, UserService, AuthService) {
+  $scope.contacts = UserService.getCurrentUserContacts();
 
-    $scope.editContact = function (contact) {
-      UserService.setCurrentContact(contact);
-      $location.path("/add-edit-contact");
-    };
+  $scope.logOut = function () {
+    AuthService.logOut();
+    $location.path("/sign-in");
+  };
 
-    $scope.deleteContact = function (contact) {
-      UserService.deleteContact(contact);
-    };
+  $scope.editContact = function (contact) {
+    UserService.setCurrentContact(contact);
+    $location.path("/add-edit-contact");
+  };
+
+  $scope.deleteContact = function (contact) {
+    UserService.deleteContact(contact);
+  };
+});
+
+app.controller("AddEditContactController", function ($scope, $location, UserService, AuthService) {
+  $scope.contact = {};
+  $scope.editing = false;
+
+  let currentContact = UserService.getCurrentContact();
+  if (currentContact) {
+    $scope.contact = angular.copy(currentContact);
+    $scope.editing = true;
+    UserService.clearCurrentContact();
   }
-);
 
-app.controller(
-  "AddEditContactController",
-  function ($scope, $location, UserService) {
-    $scope.contact = {};
-    $scope.editing = false;
+  $scope.saveContact = function () {
+    UserService.saveContact($scope.contact, $scope.editing);
+    $location.path("/contact-list");
+  };
 
-    let currentContact = UserService.getCurrentContact();
-    if (currentContact) {
-      $scope.contact = angular.copy(currentContact);
-      $scope.editing = true;
-      UserService.clearCurrentContact();
-    }
+  $scope.editContact = function (contact) {
+    $scope.contact = angular.copy(contact);
+    $scope.editing = true;
+    $location.path("/add-edit-contact").search({ id: contact.id });
+  };
 
-    $scope.saveContact = function () {
-      UserService.saveContact($scope.contact, $scope.editing);
-      $location.path("/contact-list");
+  $scope.logOut = function () {
+    AuthService.logOut();
+    $location.path("/sign-in");
+  };
+
+  $scope.setImage = function (element) {
+    let reader = new FileReader();
+    reader.onload = function (e) {
+      $scope.$apply(function () {
+        $scope.contact.image = e.target.result;
+      });
     };
+    reader.readAsDataURL(element.files[0]);
+  };
+});
 
-    $scope.editContact = function (contact) {
-      $scope.contact = angular.copy(contact);
-      $scope.editing = true;
-      $location.path("/add-edit-contact").search({ id: contact.id });
-    };
-    $scope.setImage = function (element) {
-      let reader = new FileReader();
-      reader.onload = function (e) {
-        $scope.$apply(function () {
-          $scope.contact.image = e.target.result;
-        });
-      };
-      reader.readAsDataURL(element.files[0]);
-    };
-  }
-);
-
-function executeAdjustment(){       
-  document.getElementById("vPassword").val(document.getElementById("txtPassword").value);
-  $(":password").remove();        
-  let myForm = document.getElementById("createServerForm");
-  myForm.action = "executeCreditAdjustment.do";
-  myForm.submit();
-}
-
-app.service("UserService", function () {
+app.service("UserService", function (AuthService) {
   let users = JSON.parse(localStorage.getItem("users")) || [];
   let currentUser = null;
   let currentContact = null;
@@ -146,10 +166,12 @@ app.service("UserService", function () {
       let user = getUserByEmail(email);
       if (user && user.password === password) {
         currentUser = user;
+        AuthService.logIn();
         return true;
       }
       return false;
     },
+
     signUp: function (email, password) {
       if (getUserByEmail(email)) {
         return false;
@@ -207,5 +229,26 @@ app.service("UserService", function () {
     clearCurrentContact: function () {
       currentContact = null;
     },
+  };
+});
+
+app.service("AuthService", function ($location) {
+  let loggedIn = false;
+
+  return {
+    isLoggedIn: function () {
+      return loggedIn;
+    },
+    logIn: function () {
+      loggedIn = true;
+    },
+    logOut: function () {
+      loggedIn = false;
+    },
+    requireLogin: function () {
+      if (!loggedIn) {
+        $location.path("/sign-in");
+      }
+    }
   };
 });
